@@ -1,3 +1,5 @@
+// Load config from .env file
+// Copy .env.example into .env then adjust value to match with your configuration
 const dotenv = require("dotenv");
 dotenv.config();
 
