@@ -1,0 +1,17 @@
+{
+  "name": "aws-s3-multipart-upload-sample",
+  "version": "1.0.0",
+  "description": "Sample about How to upload multipart into S3 using S3 SDK client for Javascript",
+  "main": "upload.js",
+  "scripts": {
+    "start": "node upload.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "longgt",
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/abort-controller": "^3.226.0",
+    "@aws-sdk/client-s3": "^3.241.0",
+    "dotenv": "^16.0.3"
+  }
+}
