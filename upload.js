@@ -1,23 +1,20 @@
-// Load config from .env file
-// Copy .env.example into .env then adjust value to match with your configuration
 const dotenv = require("dotenv");
 dotenv.config();
 
 const {
   S3Client,
-  // AbortMultipartUploadCommand,
+  AbortMultipartUploadCommand,
   CreateMultipartUploadCommand,
   UploadPartCommand,
   CompleteMultipartUploadCommand,
+  ListPartsCommand,
 } = require("@aws-sdk/client-s3");
 const fs = require("fs");
 const path = require("path");
 
 // https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html
-const CHUNK_SIZE = 5000 * 1024 * 1024; // AWS S3 allows minimum 5MiB each
+const CHUNK_SIZE = 5 * 1024 * 1024; // AWS S3 allows minimum 5MiB each
 
-// Create S3 client
-// Adjust "credentials" to match with your use case
 const client = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
@@ -36,6 +33,7 @@ async function executeCommand(command) {
     return data;
   } catch (e) {
     console.error(`Execute command failed`, e);
+    throw e;
   }
 }
 
@@ -49,7 +47,7 @@ async function uploadParts(fileBuffer, uploadOptions) {
   let chunkCount = 0;
   let readBytes = 0;
   let uploadPartResults = [];
-  
+
   /**
    * This internal function will upload part into S3 sequentially 
    */
@@ -104,11 +102,9 @@ async function uploadParts(fileBuffer, uploadOptions) {
   const createCommand = new CreateMultipartUploadCommand({
     Bucket: process.env.AWS_S3_BUCKET,
     Key: uploadKey,
-    ACL: "public-read",
   });
   const createResult = await executeCommand(createCommand);
 
-  // Read file content, in browser it can be replaced by HTML 5 File Object
   const fileBuffer = fs.readFileSync(path.join(__dirname, "data", uploadFile), {
     flag: "r",
   });
@@ -120,29 +116,49 @@ async function uploadParts(fileBuffer, uploadOptions) {
     UploadId: createResult.UploadId,
   });
 
-  // Signals to S3 that all parts have been uploaded and it can combine the parts into one file
-  const completeCommand = new CompleteMultipartUploadCommand({
-    Bucket: createResult.Bucket,
-    Key: createResult.Key,
-    UploadId: createResult.UploadId,
-    MultipartUpload: {
-      Parts: uploadPartsResult,
-    },
-  });
-
-  const completeResult = await executeCommand(completeCommand);
-
-  console.log("Uploaded multipart successfully", completeResult);
-
-  /*
-   * Use the below command to abort multipart upload request
-   */
-  /*
-  const abortCommand = new AbortMultipartUploadCommand({
+  // List parts which has been upload before
+  const listPartsCommand = new ListPartsCommand({
     Bucket: createResult.Bucket,
     Key: createResult.Key,
     UploadId: createResult.UploadId,
   });
-  const abortResult = await executeCommand(abortCommand);
-  */
+  const listPartsResult = await executeCommand(listPartsCommand);
+
+  // Sample of part object in Parts array
+  // {
+  //   PartNumber: 1,
+  //   LastModified: 2022-12-30T09:49:59.000Z,
+  //   ETag: '"95d446738250d7bb812ee84115c32ebf"',
+  //   Size: 5242880,
+  //   ChecksumCRC32: undefined,
+  //   ChecksumCRC32C: undefined,
+  //   ChecksumSHA1: undefined,
+  //   ChecksumSHA256: undefined
+  // }
+  console.log(`Uploaded parts`, listPartsResult.Parts);
+
+  try {
+    // Signals to S3 that all parts have been uploaded and it can combine the parts into one file
+    const completeCommand = new CompleteMultipartUploadCommand({
+      Bucket: createResult.Bucket,
+      Key: createResult.Key,
+      UploadId: createResult.UploadId,
+      MultipartUpload: {
+        Parts: uploadPartsResult,
+      },
+    });
+
+    const completeResult = await executeCommand(completeCommand);
+  } catch (e) {
+    /*
+     * Use the below command to abort multipart upload request
+     */
+
+    const abortCommand = new AbortMultipartUploadCommand({
+      Bucket: createResult.Bucket,
+      Key: createResult.Key,
+      UploadId: createResult.UploadId,
+    });
+    const abortResult = await executeCommand(abortCommand);
+  }
 })();
