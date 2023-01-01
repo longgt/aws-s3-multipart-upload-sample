@@ -2,6 +2,7 @@ const path = require("path");
 const fs = require("fs");
 const axios = require("axios");
 const FormData = require("form-data");
+const axiosRetry = require('axios-retry');
 const dotenv = require("dotenv");
 
 dotenv.config();
@@ -10,7 +11,8 @@ const ENDPOINT =
   "https://vm3h8bun7l.execute-api.ap-southeast-1.amazonaws.com/prod";
 //"https://manfgc2pocxr3tssyrlfzkhdpe0ubrgi.lambda-url.ap-southeast-1.on.aws/";
 const authorizationHeader = `${process.env.AWS_API_KEY}`;
-const ORIGIN_FILE_NAME = "8mb_text.txt";
+const ORIGIN_FILE_NAME = "sample.png";
+const CONTENT_TYPE = "image/png";
 const UPLOAD_TYPE = {
   FIRST: '0',
   PART: '1',
@@ -18,25 +20,30 @@ const UPLOAD_TYPE = {
   ABORT: '3'
 };
 
+axiosRetry(axios, {
+  retries: 3,
+  retryDelay: (retryCount) => retryCount * 1000,
+  retryCondition: (error) => {
+    return error.response && error.response.status >= 500;
+  }
+});
+
 (async () => {
-  const file3MbBuffer = fs.readFileSync(
-    path.join(__dirname, "data", "3mb.txt"),
+  const part1Buffer = fs.readFileSync(
+    path.join(__dirname, "data", "sample_part1.png"),
     {
-      encoding: "ascii",
       flag: "r",
     }
   );
-  const file4MbBuffer = fs.readFileSync(
-    path.join(__dirname, "data", "4mb.txt"),
+  const part2Buffer = fs.readFileSync(
+    path.join(__dirname, "data", "sample_part2.png"),
     {
-      encoding: "ascii",
       flag: "r",
     }
   );
-  const file1MbBuffer = fs.readFileSync(
-    path.join(__dirname, "data", "1mb.txt"),
+  const part3Buffer = fs.readFileSync(
+    path.join(__dirname, "data", "sample_part3.png"),
     {
-      encoding: "ascii",
       flag: "r",
     }
   );
@@ -46,9 +53,9 @@ const UPLOAD_TYPE = {
     let form = new FormData();
     form.append("type", UPLOAD_TYPE.FIRST);
     form.append("partNumber", chunkCount++);
-    form.append("file", file3MbBuffer, {
+    form.append("file", part1Buffer, {
       filename: ORIGIN_FILE_NAME,
-      contentType: "text/plain",
+      contentType: CONTENT_TYPE,
     });
     let chunkResponse = await axios.post(ENDPOINT, form, {
       headers: {
@@ -56,16 +63,16 @@ const UPLOAD_TYPE = {
         "Content-Type": "multipart/form-data",
       },
     });
-    console.log(`First chunk upload result`, chunkResponse.data);
+    console.log(`Chunk[${chunkCount - 1}] upload result`, chunkResponse.data);
     const uploadId = chunkResponse.data.uploadId;
 
     // Upload part
     form = new FormData();
     form.append("type", UPLOAD_TYPE.PART);
     form.append("partNumber", chunkCount++);
-    form.append("file", file4MbBuffer, {
+    form.append("file", part2Buffer, {
       filename: ORIGIN_FILE_NAME,
-      contentType: "text/plain",
+      contentType: CONTENT_TYPE,
     });
     form.append("uploadId", uploadId);
 
@@ -76,15 +83,15 @@ const UPLOAD_TYPE = {
       },
     });
 
-    console.log(`Part upload result`, chunkResponse.data);
+    console.log(`Chunk[${chunkCount - 1}] upload result`, chunkResponse.data);
 
     // Last chunk
     form = new FormData();
     form.append("type", UPLOAD_TYPE.COMPLETE);
     form.append("partNumber", chunkCount++);
-    form.append("file", file1MbBuffer, {
+    form.append("file", part3Buffer, {
       filename: ORIGIN_FILE_NAME,
-      contentType: "text/plain",
+      contentType: CONTENT_TYPE,
     });
     form.append("uploadId", uploadId);
 
