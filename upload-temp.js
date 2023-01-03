@@ -28,81 +28,85 @@ axiosRetry(axios, {
   }
 });
 
+async function uploadMultiparts(blob, chunkSize, callback) {
+  let totalChunk = Math.ceil(blob.length / chunkSize);
+  let chunkCount = 0;
+  let readBytes = 0;
+  
+  const readPart = async () => {
+      if (readBytes >= blob.length) {
+          return;
+      }
+
+      const start = readBytes;
+      const end = Math.min(blob.length, readBytes + chunkSize);
+      const partBuf = blob.slice(start, end);
+      readBytes += partBuf.length;
+      
+      const chunkNumber = ++chunkCount;
+      // Trigger upload next part
+      const next = chunkNumber === totalChunk ? () => {} : async () => {
+          await readPart();
+      };
+      // Invoke callback
+      await callback(partBuf, { ranges: { start, end }, chunkNumber, totalChunk }, next);
+  };
+
+  // Begin upload 1st part
+  await readPart();
+}
+
 (async () => {
-  const part1Buffer = fs.readFileSync(
-    path.join(__dirname, "data", "sample_part1.png"),
-    {
-      flag: "r",
-    }
-  );
-  const part2Buffer = fs.readFileSync(
-    path.join(__dirname, "data", "sample_part2.png"),
-    {
-      flag: "r",
-    }
-  );
-  const part3Buffer = fs.readFileSync(
-    path.join(__dirname, "data", "sample_part3.png"),
+  // Read file into buffer
+  const fileBuffer = fs.readFileSync(
+    path.join(__dirname, "data", "sample.png"),
     {
       flag: "r",
     }
   );
 
   try {
-    let chunkCount = 1;
-    let form = new FormData();
-    form.append("type", UPLOAD_TYPE.FIRST);
-    form.append("partNumber", chunkCount++);
-    form.append("file", part1Buffer, {
-      filename: ORIGIN_FILE_NAME,
-      contentType: CONTENT_TYPE,
-    });
-    let chunkResponse = await axios.post(ENDPOINT, form, {
-      headers: {
-        Authorization: authorizationHeader,
-        "Content-Type": "multipart/form-data",
-      },
-    });
-    console.log(`Chunk[${chunkCount - 1}] upload result`, chunkResponse.data);
-    const uploadId = chunkResponse.data.uploadId;
+    let uploadId = '';
 
-    // Upload part
-    form = new FormData();
-    form.append("type", UPLOAD_TYPE.PART);
-    form.append("partNumber", chunkCount++);
-    form.append("file", part2Buffer, {
-      filename: ORIGIN_FILE_NAME,
-      contentType: CONTENT_TYPE,
+    // Upload file by splitting into multiparts, 4MiB each
+    await uploadMultiparts(fileBuffer, 4 * 1024 * 1024, async (partBuf, options, next) => {
+      let type;
+
+      if (options.chunkNumber == options.totalChunk) {
+        type = UPLOAD_TYPE.COMPLETE;
+      } else if (options.chunkNumber == 1) {
+        type = UPLOAD_TYPE.FIRST;
+      } else {
+        type = UPLOAD_TYPE.PART;
+      }
+
+      let form = new FormData();
+      form.append("type", type);
+      form.append("partNumber", options.chunkNumber);
+      form.append("file", partBuf, {
+        filename: ORIGIN_FILE_NAME,
+        contentType: CONTENT_TYPE,
+      });
+      if (uploadId) {
+        form.append("uploadId", uploadId);
+      }
+      let chunkResponse = await axios.post(ENDPOINT, form, {
+        headers: {
+          Authorization: authorizationHeader,
+          "Content-Type": "multipart/form-data",
+        },
+      });
+  
+      console.log(`Chunk[${options.chunkNumber}] upload result`, chunkResponse.data);
+
+      if (chunkResponse.data.uploadId) {
+        uploadId = chunkResponse.data.uploadId;
+      }
+
+      if (next) {
+        await next();
+      }
     });
-    form.append("uploadId", uploadId);
-
-    chunkResponse = await axios.post(ENDPOINT, form, {
-      headers: {
-        Authorization: authorizationHeader,
-        "Content-Type": "multipart/form-data",
-      },
-    });
-
-    console.log(`Chunk[${chunkCount - 1}] upload result`, chunkResponse.data);
-
-    // Last chunk
-    form = new FormData();
-    form.append("type", UPLOAD_TYPE.COMPLETE);
-    form.append("partNumber", chunkCount++);
-    form.append("file", part3Buffer, {
-      filename: ORIGIN_FILE_NAME,
-      contentType: CONTENT_TYPE,
-    });
-    form.append("uploadId", uploadId);
-
-    chunkResponse = await axios.post(ENDPOINT, form, {
-      headers: {
-        Authorization: authorizationHeader,
-        "Content-Type": "multipart/form-data",
-      },
-    });
-
-    console.log(`Last chunk upload result`, chunkResponse.data.ETag);
 
     // Cleanup
     form = new FormData();
